@@ -1,20 +1,9 @@
-"""Tmux-based orchestration of the Cursor ``agent`` CLI.
-
-Starts ``agent`` in detached tmux sessions, sends prompts via ``send-keys``,
-and polls TUI state to detect lifecycle transitions (trust dialog, ready,
-busy, done).  All Cursor-agent-specific markers and heuristics live here so
-callers only interact with high-level functions.
-"""
+"""TUI markers, tmux pane capture, and Cursor agent lifecycle helpers."""
 
 from __future__ import annotations
 
-import os
 import re
-import shutil
-import sys
-import tempfile
 import time
-from pathlib import Path
 
 import libtmux
 
@@ -55,6 +44,7 @@ def tail_text(pane: libtmux.Pane, n_lines: int = 10) -> str:
 # All operate on a pre-captured text snapshot so callers control capture scope.
 # ---------------------------------------------------------------------------
 
+
 def is_trust_prompt(text: str) -> bool:
     """Trust dialog is active (waiting for ``a`` / ``q``).
 
@@ -77,6 +67,7 @@ def is_busy(text: str) -> bool:
 # Lifecycle actions
 # ---------------------------------------------------------------------------
 
+
 def handle_trust(pane: libtmux.Pane, timeout_s: float = AGENT_TIMEOUT_S) -> None:
     """Accept the workspace-trust dialog and wait for it to disappear.
 
@@ -95,6 +86,7 @@ def handle_trust(pane: libtmux.Pane, timeout_s: float = AGENT_TIMEOUT_S) -> None
 # ---------------------------------------------------------------------------
 # Lifecycle waiters
 # ---------------------------------------------------------------------------
+
 
 def await_ready(pane: libtmux.Pane, timeout_s: float = AGENT_TIMEOUT_S) -> None:
     """Poll until the agent is ready for input.
@@ -131,102 +123,3 @@ def await_done(pane: libtmux.Pane, timeout_s: float = AGENT_TIMEOUT_S) -> None:
             return
         time.sleep(POLL_INTERVAL_S)
     raise TimeoutError(f"agent work exceeded {timeout_s}s")
-
-
-# ---------------------------------------------------------------------------
-# High-level agent runner
-# ---------------------------------------------------------------------------
-
-def run_agent(
-    workspace: Path,
-    model: str,
-    prompt: str,
-    *,
-    tmux_socket: str = "cursor-agent",
-    label: str = "agent",
-    quiet: bool = False,
-) -> int:
-    """Start ``agent`` in a detached tmux session, send *prompt*, wait for completion.
-
-    Parameters
-    ----------
-    workspace:
-        Working directory for the agent (also where the temp prompt file is created).
-    model:
-        Model identifier passed to ``agent --model``.
-    prompt:
-        Full prompt text.  Written to a temp file under *workspace* and referenced
-        via a short instruction sent to the agent TUI.
-    tmux_socket:
-        Name of the tmux server socket (``tmux -L <socket>``).  Each logical
-        group of agents should use its own socket to stay isolated.
-    label:
-        Human-readable label used for the tmux session name and log lines.
-    quiet:
-        When ``True``, suppress informational output (start / attach / done).
-
-    Returns
-    -------
-    int
-        ``0`` on success, non-zero on failure.
-    """
-    agent_bin = shutil.which("agent")
-    if not agent_bin:
-        print("error: `agent` not found on PATH (install Cursor CLI)", file=sys.stderr)
-        return 127
-
-    server = libtmux.Server(socket_name=tmux_socket)
-    session_name = label
-
-    try:
-        old = server.sessions.get(session_name=session_name)
-        if old is not None:
-            old.kill()
-    except Exception:
-        pass
-
-    fd, prompt_path = tempfile.mkstemp(suffix=".md", prefix="cursor-driver-prompt-", dir=str(workspace))
-    try:
-        os.write(fd, prompt.encode("utf-8"))
-        os.close(fd)
-
-        agent_cmd = f"{agent_bin} --yolo --model {model} --workspace {workspace}"
-        if not quiet:
-            print(f"[{label}] starting agent in tmux ...", flush=True)
-            print(f"[{label}] attach with:  tmux -L {tmux_socket} attach -t {session_name}", flush=True)
-
-        session = server.new_session(
-            session_name=session_name,
-            window_command=agent_cmd,
-            attach=False,
-        )
-        pane = session.active_window.active_pane
-        assert pane is not None
-
-        await_ready(pane)
-
-        short_prompt = f"Read and follow the instructions in {prompt_path}"
-        pane.send_keys(short_prompt, enter=False)
-        time.sleep(0.2)
-        pane.send_keys("", enter=True)
-
-        await_busy(pane)
-        await_done(pane)
-        if not quiet:
-            print(f"[{label}] done.", flush=True)
-        return 0
-
-    except TimeoutError as exc:
-        print(f"[{label}] timeout: {exc}", file=sys.stderr)
-        return 1
-    except Exception as exc:
-        print(f"[{label}] error: {exc}", file=sys.stderr)
-        return 1
-    finally:
-        Path(prompt_path).unlink(missing_ok=True)
-        try:
-            s = server.sessions.get(session_name=session_name)
-            if s is not None:
-                s.kill()
-        except Exception:
-            pass
