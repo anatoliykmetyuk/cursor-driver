@@ -31,6 +31,18 @@ driver.send_prompt("Second instruction.")
 driver.await_done()
 ```
 
+## Cursor skill (harness)
+
+This repo ships a **Cursor agent skill** at [`skills/harness/`](skills/harness/) (`SKILL.md`). It guides agents through turning a markdown SOP into a Python harness that scripts mechanical steps and delegates agentic steps via `cursor-driver`.
+
+Install or refresh the skill into your global agent and Cursor skill paths (requires [Node.js](https://nodejs.org/) for `npx`):
+
+```bash
+./scripts/install-skill.sh
+```
+
+Run again after you edit `skills/harness/`.
+
 ## API
 
 The package exports a single public class. Import: `from cursor_driver import CursorAgent` (same class: `cursor_driver.agent.CursorAgent`).

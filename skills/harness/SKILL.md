@@ -41,26 +41,24 @@ need an agent's judgment.
 
 ## Step 2 — Create the project directory
 
-Create a **new directory** for the harness and move the SOP into it.  The
-original SOP's parent directory is not touched.  If the SOP file is
+Create a **new directory** for the harness and move the SOP into it.  If the SOP file is
 `some-dir/my-procedure.md`, create `some-dir/my-procedure/` and move
 the SOP inside as `SOP.md`:
 
 ```
 some-dir/
-├── my-procedure.md        # DELETED (moved into the new directory below)
-└── my-procedure/
-    ├── SOP.md             # original SOP, moved and renamed
-├── setup.sh               # create venv, install deps
-├── run.sh                 # activate venv, run the script
-├── requirements.txt       # cursor-driver (absolute path) + any other deps
-├── .gitignore
-├── src/
-│   └── <script>.py        # the main automation script
-├── prompts/
-│   ├── <step-a>.md        # prompt template for first agentic step
-│   └── <step-b>.md        # prompt template for second agentic step
-└── out/                   # (gitignored) agent output artifacts
+└── my-procedure/                  # new directory, named after the SOP
+    ├── SOP.md                     # original SOP, moved here and renamed
+    ├── setup.sh                   # create venv, install deps
+    ├── run.sh                     # activate venv, run the script
+    ├── requirements.txt           # cursor-driver (absolute path) + any other deps
+    ├── .gitignore
+    ├── src/
+    │   └── <script>.py            # the main automation script
+    ├── prompts/
+    │   ├── <step-a>.md            # prompt template for first agentic step
+    │   └── <step-b>.md            # prompt template for second agentic step
+    └── out/                       # (gitignored) agent output artifacts
 ```
 
 ### File contents
@@ -118,7 +116,7 @@ A good prompt template has:
    not do (which files to edit, which fields to change, what constitutes a
    valid output).
 
-Example (from a plugin-discovery SOP):
+Example:
 
 ```markdown
 You are running the discovery workflow for **one** plugin.
@@ -177,9 +175,16 @@ def apply_placeholders(template: str, mapping: dict[str, str]) -> str:
     return out
 ```
 
-### One function per agent
+### One function per SOP step
 
-Every agentic step gets its own function that:
+Every step of the SOP gets its own function in the script — mechanical or
+agentic.  When someone reads the script, they should be able to look at the
+function list and immediately see the 1-to-1 mapping to the SOP steps.
+
+For **mechanical** steps, the function contains the Python logic directly
+(clone a repo, parse JSON, back up a file, etc.).
+
+For **agentic** steps, the function:
 
 1. Prepares the placeholder mapping from runtime data.
 2. Calls `apply_placeholders` on the prompt template.
@@ -218,6 +223,10 @@ When the SOP loops over a collection (e.g. "for each plugin"), use
 unique label (e.g. `plugin-{id}`) so tmux sessions don't collide.  Use a
 `threading.Lock` around shared mutable counters.
 
+Display a `tqdm` progress bar on stderr to track completion.  Add `tqdm` to
+`requirements.txt`.  Update the bar in the `as_completed` loop so the
+operator sees how many items have finished out of the total.
+
 ### CLI
 
 Expose useful flags via `argparse`: `--parallel`, `--max-items`,
@@ -225,19 +234,28 @@ Expose useful flags via `argparse`: `--parallel`, `--max-items`,
 
 ### Main function
 
-`main()` should be short — just orchestration calls:
+`main()` should be short and read like the SOP itself — a sequence of calls
+to the per-step functions.  Someone reading `main()` should immediately
+recognize the SOP's procedure:
 
-1. Load data, back up state.
-2. Call the parallel-agent function for the loop step.
-3. Call the summary-agent function.
-4. Report results.
+```python
+def main() -> int:
+    args = parse_args()
+    # Step 1
+    step_1_result = run_step_1(...)
+    # Step 2
+    step_2_result = run_step_2(...)
+    # Step 3
+    ...
+```
 
-## Step 5 — Update the SOP
+## The SOP is the source of truth
 
-After the harness is built, update `SOP.md` to reflect the new reality.
-Mechanical steps should note that automation handles them.  The SOP becomes
-the human-readable companion to the script — it explains *what* and *why*;
-the script handles *how*.
+Do **not** modify the body of `SOP.md`.  The only change allowed is adding a
+short paragraph at the very top stating that this SOP is automated and should
+be executed via `./run.sh`.  Everything else stays exactly as the user wrote
+it.  The script is an implementation of the SOP, not a replacement — if the
+SOP changes, the script should be updated to match, not the other way around.
 
 ## Checklist
 
