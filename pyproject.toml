@@ -9,6 +9,8 @@ dependencies = ["libtmux"]
 dev = [
     "pytest>=8.0",
     "pytest-timeout>=2.3",
+    "ruff>=0.9",
+    "mypy>=1.8",
 ]
 
 [build-system]
@@ -21,9 +23,29 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+cursor_driver = ["py.typed"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--maxfail=0"
 markers = [
     "integration: live Cursor agent + tmux (requires CURSOR_DRIVER_INTEGRATION=1)",
 ]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.10"
+packages = ["cursor_driver"]
+mypy_path = "src"
+strict = false
+warn_return_any = true
+warn_unused_ignores = true
+show_error_codes = true

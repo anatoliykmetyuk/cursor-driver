@@ -190,7 +190,9 @@ class CursorAgent:
         try:
             if prompt is not None:
                 fd, prompt_path = tempfile.mkstemp(
-                    suffix=".md", prefix="cursor-driver-prompt-", dir=str(self.workspace)
+                    suffix=".md",
+                    prefix="cursor-driver-prompt-",
+                    dir=str(self.workspace),
                 )
                 os.write(fd, prompt.encode("utf-8"))
                 os.close(fd)
@@ -199,7 +201,8 @@ class CursorAgent:
             if not self.quiet:
                 print(f"[{self.label}] starting agent in tmux ...", flush=True)
                 print(
-                    f"[{self.label}] attach with:  tmux -L {self.tmux_socket} attach -t {session_name}",
+                    f"[{self.label}] attach with:  tmux -L {self.tmux_socket} "
+                    f"attach -t {session_name}",
                     flush=True,
                 )
 

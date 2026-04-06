@@ -29,9 +29,7 @@ def _kill_session(socket_name: str, session_name: str) -> None:
         pass
 
 
-def test_I1_cold_start_await_ready(
-    tmp_path: Path, unique_session_ids: tuple[str, str]
-) -> None:
+def test_I1_cold_start_await_ready(tmp_path: Path, unique_session_ids: tuple[str, str]) -> None:
     soc, label = unique_session_ids
     agent = CursorAgent(
         tmp_path,
@@ -118,8 +116,7 @@ def test_multi_turn_ready_busy_done(
             assert agent.is_ready()
             token = uuid.uuid4().hex[:8]
             agent.send_prompt(
-                f"Append exactly one line to {log}: TURN {t} {token}\\n"
-                "Then stop. Reply DONE.",
+                f"Append exactly one line to {log}: TURN {t} {token}\\nThen stop. Reply DONE.",
                 timeout_s=900,
             )
             agent.await_done(timeout_s=900)
@@ -170,7 +167,9 @@ def test_K2_kill_session_false_session_survives(
 
 
 def test_quiet_suppresses_driver_prints(
-    tmp_path: Path, unique_session_ids: tuple[str, str], capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    unique_session_ids: tuple[str, str],
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     soc, label = unique_session_ids
     agent = CursorAgent(

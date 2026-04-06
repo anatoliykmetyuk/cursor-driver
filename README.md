@@ -52,6 +52,16 @@ The package exports a single public class. Import: `from cursor_driver import Cu
 
 **Attributes** (set at construction): `workspace`, `model`, `tmux_socket`, `label`, `quiet`, `kill_session`.
 
+## Lint
+
+[Ruff](https://docs.astral.sh/ruff/) (lint + format check) and [mypy](https://mypy.readthedocs.io/) on `cursor_driver` only:
+
+```bash
+./scripts/lint.sh
+```
+
+Auto-format with `ruff format src tests`.
+
 ## Tests
 
 ```bash

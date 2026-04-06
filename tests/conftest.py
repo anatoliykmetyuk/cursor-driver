@@ -11,7 +11,11 @@ import pytest
 
 @pytest.fixture
 def integration_enabled() -> bool:
-    return os.environ.get("CURSOR_DRIVER_INTEGRATION", "").strip() in ("1", "true", "yes")
+    return os.environ.get("CURSOR_DRIVER_INTEGRATION", "").strip() in (
+        "1",
+        "true",
+        "yes",
+    )
 
 
 @pytest.fixture

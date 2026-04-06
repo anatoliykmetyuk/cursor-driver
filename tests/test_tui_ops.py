@@ -103,7 +103,7 @@ def test_predicate_matrix(
 
 
 def test_adversarial_footer_plus_trust_documents_ready_first_branch() -> None:
-    """If footer + trust appear together, ``is_ready`` is True before trust handling in ``await_ready``."""
+    """Footer + trust: ``is_ready`` is True before trust handling in ``await_ready``."""
     text = f"{F}\n{T}"
     assert tui_ops.is_ready(text) is True
     assert tui_ops.is_trust_prompt(text) is False
