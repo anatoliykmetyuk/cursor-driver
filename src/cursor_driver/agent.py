@@ -27,8 +27,9 @@ class CursorAgent:
     *prompt* is omitted, only the tmux session is started.
 
     For a two-step flow (start empty, then :meth:`send_prompt` one or more times),
-    pass ``kill_session=False`` so the session stays alive.  The default
-    ``kill_session=True`` tears the session down in a ``finally`` block; the
+    pass ``kill_session=False`` so the session stays alive.  Call :meth:`stop`
+    to kill that session explicitly.  The default ``kill_session=True`` tears
+    the session down in a ``finally`` block after :meth:`start` returns; the
     returned :attr:`pane` is then no longer usable for further input.
 
     Lifecycle predicates (:meth:`is_trust_prompt`, :meth:`is_ready`, :meth:`is_busy`)
@@ -79,6 +80,23 @@ class CursorAgent:
         if self.pane is None:
             raise RuntimeError("CursorAgent is not started; call start() first")
         return self.pane
+
+    def stop(self) -> None:
+        """Kill the tmux session for this agent and clear :attr:`pane`.
+
+        Tears down the ``agent`` process that was started as the session's
+        initial command.  Safe if the session does not exist or was already
+        removed.  Use this to stop a long-lived session started with
+        ``kill_session=False`` without waiting for :meth:`start` to return.
+        """
+        try:
+            server = libtmux.Server(socket_name=self.tmux_socket)
+            s = server.sessions.get(session_name=self.label)
+            if s is not None:
+                s.kill()
+        except Exception:
+            pass
+        self.pane = None
 
     # --- lifecycle predicates (capture pane, delegate to :mod:`cursor_driver.tui_ops`) ---
 
@@ -236,9 +254,4 @@ class CursorAgent:
             if prompt_path is not None:
                 Path(prompt_path).unlink(missing_ok=True)
             if self.kill_session:
-                try:
-                    s = server.sessions.get(session_name=session_name)
-                    if s is not None:
-                        s.kill()
-                except Exception:
-                    pass
+                self.stop()

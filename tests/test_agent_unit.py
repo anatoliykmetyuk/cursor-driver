@@ -25,6 +25,17 @@ def test_require_pane_methods_before_start_raise(tmp_path: Path) -> None:
         agent.await_ready(timeout_s=1.0)
     with pytest.raises(RuntimeError, match="not started"):
         agent.send_prompt("hi")
+    agent.stop()
+
+
+def test_stop_is_safe_before_start_and_clears_pane(tmp_path: Path) -> None:
+    agent = CursorAgent(tmp_path, "composer-2", kill_session=False)
+    agent.stop()
+    assert agent.pane is None
+    pane = MockPane([[F]])
+    agent.pane = pane
+    agent.stop()
+    assert agent.pane is None
 
 
 def test_start_returns_127_when_agent_not_on_path(
