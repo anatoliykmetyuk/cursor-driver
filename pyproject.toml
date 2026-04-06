@@ -1,0 +1,13 @@
+[project]
+name = "cursor-driver"
+version = "0.1.0"
+description = "Tmux-based orchestration of the Cursor agent CLI"
+requires-python = ">=3.10"
+dependencies = ["libtmux"]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["cursor_driver"]
