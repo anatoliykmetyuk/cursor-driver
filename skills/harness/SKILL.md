@@ -1,0 +1,252 @@
+---
+name: harness
+description: >
+  Turn a markdown SOP (Standard Operating Procedure) into a Python harness
+  that automates mechanical steps via script and delegates agentic steps to
+  Cursor agents via cursor-driver.  Use this skill whenever the user wants to
+  automate an SOP, convert a procedure into a script, harness a workflow, or
+  mentions turning a markdown procedure into code that orchestrates agents.
+  Also use when the user says "harness", "automate this SOP", or asks to
+  create a scripted agent pipeline from a document.
+---
+
+# Harness — SOP-to-Script Automation
+
+You are converting a human-readable SOP (Standard Operating Procedure) written
+in markdown into a self-contained Python project that **scripts** the
+mechanical parts and **delegates** the judgment-heavy parts to Cursor agents
+via `cursor-driver`.
+
+## When to use this skill
+
+- The user has (or points you at) a markdown file describing a multi-step
+  procedure.
+- Some steps are rote (clone repos, copy files, parse JSON) and some require
+  reasoning or code inspection that an LLM agent should handle.
+- The goal is a one-command `./run.sh` that executes the whole procedure.
+
+## Step 1 — Understand the SOP
+
+Read the SOP markdown.  For every numbered step, decide (with the user)
+whether it is:
+
+| Category | Examples | How it ends up |
+|----------|----------|----------------|
+| **Mechanical** | clone a repo, copy a file, parse JSON, filter a list, back up a file | Python code in the script |
+| **Agentic** | inspect source code and decide something, write a summary, make a judgment call | A prompt template fed to `CursorAgent` |
+
+Present your classification to the user and get confirmation before writing
+any code.  The user knows which steps they trust a script to do and which
+need an agent's judgment.
+
+## Step 2 — Create the project directory
+
+Convert the SOP's home into a self-contained Python project.  If the SOP file
+is `some-dir/my-procedure.md`, the result is:
+
+```
+some-dir/
+├── SOP.md                 # original SOP, renamed
+├── setup.sh               # create venv, install deps
+├── run.sh                 # activate venv, run the script
+├── requirements.txt       # cursor-driver (absolute path) + any other deps
+├── .gitignore
+├── src/
+│   └── <script>.py        # the main automation script
+├── prompts/
+│   ├── <step-a>.md        # prompt template for first agentic step
+│   └── <step-b>.md        # prompt template for second agentic step
+└── out/                   # (gitignored) agent output artifacts
+```
+
+### File contents
+
+**`setup.sh`**
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")"
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+```
+
+**`run.sh`**
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")"
+exec .venv/bin/python -u src/<script>.py "$@"
+```
+
+**`requirements.txt`** — always include cursor-driver via absolute local path:
+
+```
+/Users/anatolii/Projects/cursor-driver
+```
+
+Add other dependencies (e.g. `tqdm`) as needed.
+
+**`.gitignore`**
+
+```
+.venv/
+__pycache__/
+out/
+```
+
+Make `setup.sh` and `run.sh` executable.
+
+## Step 3 — Write prompt templates
+
+For each agentic step, create a markdown file under `prompts/`.  Prompt
+templates use `{{PLACEHOLDER}}` syntax for variables the script fills in at
+runtime.
+
+A good prompt template has:
+
+1. **Context table** — a markdown table mapping field names to `{{PLACEHOLDER}}`
+   values so the agent knows exactly what it is working with.
+2. **Task list** — numbered steps the agent must perform, referencing
+   placeholders by name.
+3. **Rules / constraints** — explicit boundaries on what the agent may and may
+   not do (which files to edit, which fields to change, what constitutes a
+   valid output).
+
+Example (from a plugin-discovery SOP):
+
+```markdown
+You are running the discovery workflow for **one** plugin.
+
+## Context
+
+| Field | Value |
+|-------|-------|
+| Plugin ID | {{PLUGIN_ID}} |
+| Clone path | {{CLONE_DIR}} |
+| Tracker file | {{TRACKER_PATH}} |
+
+## Tasks
+
+1. Read `{{CLONE_DIR}}/build.sbt`.
+2. Decide porting status using the markers below.
+3. Edit `{{TRACKER_PATH}}`: update Status for ID {{PLUGIN_ID}}.
+
+## Rules
+
+- Only change Status to "Already Ported" if markers confirm it.
+  Otherwise leave the existing value untouched.
+```
+
+Keep prompts focused on a single concern.  If the SOP has a final
+aggregation / summary step, that is a separate prompt template with its own
+placeholders.
+
+## Step 4 — Write the automation script
+
+The script lives at `src/<name>.py`.  Structure it as follows.
+
+### Configuration section
+
+Put tunables at the top so they are easy to find and change:
+
+```python
+AGENT_MODEL = os.environ.get("<PREFIX>_AGENT_MODEL", "composer-2-fast")
+PARALLEL = 5
+TMUX_SOCKET = "<sop-name>"
+```
+
+- Model is overridable via environment variable, with a sensible default.
+- Parallelism is a constant referenced by a `--parallel` CLI flag.
+- Tmux socket name is unique to this SOP to isolate its sessions.
+
+### Placeholder substitution
+
+Use a simple string-replace helper — no template engine needed:
+
+```python
+def apply_placeholders(template: str, mapping: dict[str, str]) -> str:
+    out = template
+    for key, value in mapping.items():
+        out = out.replace(f"{{{{{key}}}}}", value)
+    return out
+```
+
+### One function per agent
+
+Every agentic step gets its own function that:
+
+1. Prepares the placeholder mapping from runtime data.
+2. Calls `apply_placeholders` on the prompt template.
+3. Creates a `CursorAgent`, calls `.start(prompt=...)`, then `.await_done()`.
+
+```python
+from cursor_driver import CursorAgent
+
+def run_my_agent(entry, *, template, model, ...):
+    prompt = apply_placeholders(template, {"KEY": value, ...})
+    agent = CursorAgent(
+        workspace, model,
+        tmux_socket=TMUX_SOCKET, label=f"step-{entry_id}", quiet=quiet,
+    )
+    code = agent.start(prompt=prompt)
+    if code == 0:
+        agent.await_done()
+    return code
+```
+
+Key points about the cursor-driver API:
+
+- `CursorAgent(workspace, model, *, tmux_socket, label, quiet, kill_session)`
+- `.start(prompt=None) -> int` — launches agent in tmux; if prompt is given,
+  writes it to a temp file and sends the agent a short instruction to read it.
+  Returns `0` on success.  Does **not** wait for the agent to finish.
+- `.await_done(*, timeout_s=...)` — blocks until the agent finishes its
+  current work.  Call this explicitly after a successful `start()`.
+- `.send_prompt(text)` — for multi-turn flows: waits for ready, sends text,
+  waits for busy.
+
+### Parallel execution
+
+When the SOP loops over a collection (e.g. "for each plugin"), use
+`ThreadPoolExecutor` with the configurable parallelism.  Each agent gets a
+unique label (e.g. `plugin-{id}`) so tmux sessions don't collide.  Use a
+`threading.Lock` around shared mutable counters.
+
+### CLI
+
+Expose useful flags via `argparse`: `--parallel`, `--max-items`,
+`--only-id`, `--no-progress`.  Wire defaults to the configuration constants.
+
+### Main function
+
+`main()` should be short — just orchestration calls:
+
+1. Load data, back up state.
+2. Call the parallel-agent function for the loop step.
+3. Call the summary-agent function.
+4. Report results.
+
+## Step 5 — Update the SOP
+
+After the harness is built, update `SOP.md` to reflect the new reality.
+Mechanical steps should note that automation handles them.  The SOP becomes
+the human-readable companion to the script — it explains *what* and *why*;
+the script handles *how*.
+
+## Checklist
+
+Before you present the result to the user, verify:
+
+- [ ] `SOP.md` is present and reflects the automated workflow.
+- [ ] `setup.sh` and `run.sh` are executable.
+- [ ] `requirements.txt` includes the absolute path to cursor-driver.
+- [ ] Every agentic step has a prompt template in `prompts/`.
+- [ ] Prompt templates use `{{PLACEHOLDER}}` syntax, no hardcoded paths.
+- [ ] The script has a Configuration section at the top.
+- [ ] Each agent has its own function (not inlined in main).
+- [ ] `agent.await_done()` is called after every successful `agent.start()`.
+- [ ] Parallel execution uses `ThreadPoolExecutor` with configurable workers.
+- [ ] `out/` directory is gitignored and cleaned before the summary agent runs.
+- [ ] The script compiles: `python -m py_compile src/<script>.py`.
