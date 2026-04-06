@@ -41,12 +41,16 @@ need an agent's judgment.
 
 ## Step 2 — Create the project directory
 
-Convert the SOP's home into a self-contained Python project.  If the SOP file
-is `some-dir/my-procedure.md`, the result is:
+Create a **new directory** for the harness and move the SOP into it.  The
+original SOP's parent directory is not touched.  If the SOP file is
+`some-dir/my-procedure.md`, create `some-dir/my-procedure/` and move
+the SOP inside as `SOP.md`:
 
 ```
 some-dir/
-├── SOP.md                 # original SOP, renamed
+├── my-procedure.md        # DELETED (moved into the new directory below)
+└── my-procedure/
+    ├── SOP.md             # original SOP, moved and renamed
 ├── setup.sh               # create venv, install deps
 ├── run.sh                 # activate venv, run the script
 ├── requirements.txt       # cursor-driver (absolute path) + any other deps
