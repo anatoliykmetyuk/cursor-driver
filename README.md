@@ -1,5 +1,7 @@
 # cursor-driver
 
+[![CI](https://github.com/anatoliykmetyuk/cursor-driver/actions/workflows/ci.yml/badge.svg)](https://github.com/anatoliykmetyuk/cursor-driver/actions/workflows/ci.yml)
+
 Python library that runs the Cursor `agent` CLI in tmux and exposes a small API to start the session, send prompts, and observe or wait on agent lifecycle. The public surface is **`CursorAgent`** in [`src/cursor_driver/agent.py`](src/cursor_driver/agent.py).
 
 **Requirements:** Python 3.10+, tmux, `agent` on `PATH`, and the `libtmux` dependency (see [`pyproject.toml`](pyproject.toml)).
