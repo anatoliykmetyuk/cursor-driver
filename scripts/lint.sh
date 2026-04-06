@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-. .venv/bin/activate
-ruff check src tests
-ruff format --check src tests
-mypy
+if [[ -f .venv/bin/activate ]]; then
+  # shellcheck disable=SC1091
+  source .venv/bin/activate
+fi
+python3 -m ruff check src tests
+python3 -m ruff format --check src tests
+python3 -m mypy
