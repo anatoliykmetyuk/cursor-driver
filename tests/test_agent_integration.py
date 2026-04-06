@@ -19,16 +19,6 @@ pytestmark = [
 ]
 
 
-def _kill_session(socket_name: str, session_name: str) -> None:
-    try:
-        server = libtmux.Server(socket_name=socket_name)
-        s = server.sessions.get(session_name=session_name)
-        if s is not None:
-            s.kill()
-    except Exception:
-        pass
-
-
 def test_I1_cold_start_await_ready(tmp_path: Path, unique_session_ids: tuple[str, str]) -> None:
     soc, label = unique_session_ids
     agent = CursorAgent(
@@ -46,7 +36,7 @@ def test_I1_cold_start_await_ready(tmp_path: Path, unique_session_ids: tuple[str
         assert agent.is_ready()
         assert not agent.is_trust_prompt()
     finally:
-        _kill_session(soc, label)
+        agent.stop()
 
 
 def test_I2_optional_trust_phase_recorded(
@@ -68,7 +58,7 @@ def test_I2_optional_trust_phase_recorded(
         agent.await_ready(timeout_s=900)
         assert agent.is_ready()
     finally:
-        _kill_session(soc, label)
+        agent.stop()
 
 
 def test_I3_start_with_prompt_one_shot(tmp_path: Path, unique_session_ids: tuple[str, str]) -> None:
@@ -126,7 +116,7 @@ def test_multi_turn_ready_busy_done(
                 content = log.read_text(encoding="utf-8")
                 assert token in content
     finally:
-        _kill_session(soc, label)
+        agent.stop()
 
 
 def test_K1_kill_session_true_session_removed(
@@ -163,7 +153,27 @@ def test_K2_kill_session_false_session_survives(
         server = libtmux.Server(socket_name=soc)
         assert server.sessions.get(session_name=label) is not None
     finally:
-        _kill_session(soc, label)
+        agent.stop()
+
+
+def test_K3_stop_kills_session_when_kill_session_false(
+    tmp_path: Path, unique_session_ids: tuple[str, str]
+) -> None:
+    soc, label = unique_session_ids
+    agent = CursorAgent(
+        tmp_path,
+        MODEL,
+        tmux_socket=soc,
+        label=label,
+        quiet=True,
+        kill_session=False,
+    )
+    assert agent.start(prompt=None) == 0
+    assert agent.pane is not None
+    agent.stop()
+    assert agent.pane is None
+    server = libtmux.Server(socket_name=soc)
+    assert server.sessions.get(session_name=label, default=None) is None
 
 
 def test_quiet_suppresses_driver_prints(
