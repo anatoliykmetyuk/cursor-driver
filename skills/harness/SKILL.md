@@ -51,6 +51,7 @@ some-dir/
     ├── SOP.md                     # original SOP, moved here and renamed
     ├── setup.sh                   # create venv, install deps
     ├── run.sh                     # activate venv, run the script
+    ├── test.sh                    # activate venv, run pytest
     ├── requirements.txt           # cursor-driver (absolute path) + any other deps
     ├── .gitignore
     ├── src/
@@ -58,6 +59,12 @@ some-dir/
     ├── prompts/
     │   ├── <step-a>.md            # prompt template for first agentic step
     │   └── <step-b>.md            # prompt template for second agentic step
+    ├── tests/
+    │   ├── conftest.py            # shared fixtures
+    │   ├── test_helpers.py        # pure function tests
+    │   ├── test_mechanical.py     # subprocess tests (mocked)
+    │   ├── test_agents.py         # CursorAgent tests (mocked)
+    │   └── test_pipeline.py       # full pipeline flow tests
     └── out/                       # (gitignored) agent output artifacts
 ```
 
@@ -249,6 +256,34 @@ def main() -> int:
     ...
 ```
 
+## Step 5 — Write tests
+
+Every harness should have a test suite that validates orchestration logic
+without invoking real agents or external commands.  Follow the testing
+strategy documented in [TESTING.md](TESTING.md) (in this skill directory).
+
+In short:
+
+1. Add `pytest` to `requirements.txt`.
+2. Create `tests/` with one file per layer: helpers, file parsing, mechanical
+   steps (mocked `subprocess.run`), agent wrappers (mocked `CursorAgent`),
+   and pipeline flow (all mocked, every branch covered).
+3. Create `test.sh` alongside `run.sh` — a convenience script that runs
+   `pytest` inside the venv:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")"
+exec .venv/bin/python -m pytest tests/ "$@"
+```
+
+4. Make `test.sh` executable.
+5. Run the suite and fix any failures before presenting work to the user.
+
+See `TESTING.md` for the full testing strategy: layer definitions, fixture
+patterns, mock setup, scenario tables, and the checklist.
+
 ## The SOP is the source of truth
 
 Do **not** modify the body of `SOP.md`.  The only change allowed is adding a
@@ -272,3 +307,7 @@ Before you present the result to the user, verify:
 - [ ] Parallel execution uses `ThreadPoolExecutor` with configurable workers.
 - [ ] `out/` directory is gitignored and cleaned before the summary agent runs.
 - [ ] The script compiles: `python -m py_compile src/<script>.py`.
+- [ ] `pytest` is in `requirements.txt`.
+- [ ] `test.sh` is executable and runs the suite via the venv.
+- [ ] Tests cover every pipeline branch (see `TESTING.md` checklist).
+- [ ] All tests pass: `./test.sh -v`.
