@@ -11,7 +11,9 @@ import libtmux
 # TUI markers
 # ---------------------------------------------------------------------------
 
-FOOTER_MARKER = "/ commands \u00b7 @ files \u00b7 ! shell"
+# Shown on the idle agent TUI once loaded (Cursor Agent ~2026.04+). Combined with
+# BUSY_MARKER absence in :func:`is_ready` to mean "ready for input".
+FOOTER_MARKER = "Auto-run"
 BUSY_MARKER = "ctrl+c to stop"
 TRUST_MARKER = "Trust this workspace"
 
@@ -109,7 +111,7 @@ def await_busy(pane: libtmux.Pane, timeout_s: float = AGENT_TIMEOUT_S) -> None:
     """Wait until the agent starts working."""
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
-        if is_busy(tail_text(pane)):
+        if is_busy(tail_text(pane, n_lines=20)):
             return
         time.sleep(POLL_INTERVAL_S)
     raise TimeoutError("agent never started working")
@@ -119,7 +121,7 @@ def await_done(pane: libtmux.Pane, timeout_s: float = AGENT_TIMEOUT_S) -> None:
     """Wait for a busy agent to finish."""
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
-        if not is_busy(tail_text(pane)):
+        if not is_busy(tail_text(pane, n_lines=20)):
             return
         time.sleep(POLL_INTERVAL_S)
     raise TimeoutError(f"agent work exceeded {timeout_s}s")

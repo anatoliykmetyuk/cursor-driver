@@ -57,8 +57,10 @@ some-dir/
     ├── src/
     │   └── <script>.py            # the main automation script
     ├── prompts/
-    │   ├── <step-a>.md            # prompt template for first agentic step
-    │   └── <step-b>.md            # prompt template for second agentic step
+    │   ├── <step-a>.md                # single-turn agentic step
+    │   ├── <step-b>_prompt_0.md       # chunked step — first turn
+    │   ├── <step-b>_prompt_1.md       # chunked step — second turn
+    │   └── <step-b>_prompt_2.md       # chunked step — further turn (if needed)
     ├── tests/
     │   ├── conftest.py            # shared fixtures
     │   ├── test_helpers.py        # pure function tests
@@ -212,6 +214,47 @@ def run_my_agent(entry, *, template, model, ...):
     return code
 ```
 
+### Chunking prompts around long-running tasks
+
+Every long-running or token-heavy operation — compilation, a full test suite,
+an iterative fix-and-retry loop, a large data migration — floods the agent's
+context window with output.  Instructions that appeared earlier in the same
+prompt get pushed out of the model's effective attention, and in practice the
+agent "forgets" to follow them roughly a third of the time.
+
+Split each boundary where this can happen into a separate prompt chunk.  The
+first chunk runs via `agent.start(prompt=...)`, subsequent chunks via
+`agent.send_prompt(...)`.  Each call writes a fresh prompt file under the
+workspace, so the next batch of instructions lands at the top of the agent's
+attention instead of buried under pages of build logs.
+
+Name the prompt templates `<step>_prompt_0.md`, `<step>_prompt_1.md`, etc.
+under `prompts/`.  Single-turn steps that don't need chunking keep their
+plain `<step>.md` name.
+
+Use `kill_session=False` on `CursorAgent` when you chain chunks in one session.
+
+```python
+templates = [
+    prompts_dir / "deploy_prompt_0.md",   # e.g. build the project
+    prompts_dir / "deploy_prompt_1.md",   # e.g. run the test suite
+    prompts_dir / "deploy_prompt_2.md",   # e.g. analyse failures and fix
+]
+
+agent = CursorAgent(workspace, model, tmux_socket=TMUX_SOCKET, kill_session=False)
+if agent.start(prompt=apply_placeholders(templates[0].read_text(), mapping)) != 0:
+    return 1
+agent.await_done()
+for tmpl in templates[1:]:
+    agent.send_prompt(apply_placeholders(tmpl.read_text(), mapping))
+    agent.await_done()
+agent.stop()
+```
+
+The rule of thumb: if an operation might produce hundreds of lines of output or
+take long enough that the agent iterates many times, that is a chunk boundary.
+Put the instructions that follow it into the next prompt file.
+
 Key points about the cursor-driver API:
 
 - `CursorAgent(workspace, model, *, tmux_socket, label, quiet, kill_session)`
@@ -220,8 +263,10 @@ Key points about the cursor-driver API:
   Returns `0` on success.  Does **not** wait for the agent to finish.
 - `.await_done(*, timeout_s=...)` — blocks until the agent finishes its
   current work.  Call this explicitly after a successful `start()`.
-- `.send_prompt(text)` — for multi-turn flows: waits for ready, sends text,
-  waits for busy.
+- `.send_prompt(text, ..., prompt_as_file=True)` — for multi-turn flows: waits
+  for ready, sends the prompt (by default written to a temp file like `start`,
+  with a short "read this file" instruction), waits for busy.  Use
+  `prompt_as_file=False` to send *text* directly as keystrokes (short lines only).
 
 ### Parallel execution
 
@@ -311,3 +356,4 @@ Before you present the result to the user, verify:
 - [ ] `test.sh` is executable and runs the suite via the venv.
 - [ ] Tests cover every pipeline branch (see `TESTING.md` checklist).
 - [ ] All tests pass: `./test.sh -v`.
+- [ ] Agentic steps that span long-running tasks are chunked into separate `_prompt_N` turns.

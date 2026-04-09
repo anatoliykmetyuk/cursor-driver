@@ -69,6 +69,6 @@ def test_send_prompt_ordering_after_start(monkeypatch: pytest.MonkeyPatch, tmp_p
     pane = MockPane([[F], [f"{F}\n{B}"]])
     agent = CursorAgent(tmp_path, "composer-2", kill_session=False)
     agent.pane = pane  # simulate successful start without tmux
-    agent.send_prompt("hello world")
+    agent.send_prompt("hello world", prompt_as_file=False)
     assert pane.send_keys_calls[0] == ("hello world", False)
     assert pane.send_keys_calls[1] == ("", True)

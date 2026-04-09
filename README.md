@@ -53,7 +53,7 @@ The package exports a single public class. Import: `from cursor_driver import Cu
 |--------|------------|------|
 | *(constructor)* | `CursorAgent(workspace, model, *, tmux_socket=…, label=…, quiet=…, kill_session=…)` | `workspace` is a `Path`; `model` is the `--model` id; optional tmux socket name, session label, stdout noise, and whether `start()` tears down the session on exit. |
 | `start` | `start(prompt=None) -> int` | Launch `agent` in tmux and set `pane`. No prompt: return when the session exists. String prompt: run to completion. Returns `0`, `127` (no `agent`), or `1`. |
-| `send_prompt` | `send_prompt(text, *, timeout_s=...)` | After `start()`, wait for input readiness, send `text` and Enter, then wait until busy. |
+| `send_prompt` | `send_prompt(text, *, timeout_s=..., prompt_as_file=True)` | After `start()`, wait for input readiness, send the prompt (default: temp file + “read file” line, like `start(prompt=…)`), then wait until busy. |
 | `is_trust_prompt` | `is_trust_prompt() -> bool` | Snapshot: trust dialog visible. |
 | `is_ready` | `is_ready() -> bool` | Snapshot: idle, waiting for input. |
 | `is_busy` | `is_busy() -> bool` | Snapshot: working. |

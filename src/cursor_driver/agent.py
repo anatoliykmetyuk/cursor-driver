@@ -75,6 +75,20 @@ class CursorAgent:
         self.quiet = quiet
         self.kill_session = kill_session
         self.pane: libtmux.Pane | None = None
+        self._prompt_paths: list[Path] = []
+
+    def _discard_prompt_file(self, path: Path | str) -> None:
+        p = Path(path)
+        p.unlink(missing_ok=True)
+        try:
+            self._prompt_paths.remove(p)
+        except ValueError:
+            pass
+
+    def _cleanup_all_prompt_files(self) -> None:
+        for p in list(self._prompt_paths):
+            p.unlink(missing_ok=True)
+        self._prompt_paths.clear()
 
     def _require_pane(self) -> libtmux.Pane:
         if self.pane is None:
@@ -96,6 +110,7 @@ class CursorAgent:
                 s.kill()
         except Exception:
             pass
+        self._cleanup_all_prompt_files()
         self.pane = None
 
     # --- lifecycle predicates (capture pane, delegate to :mod:`cursor_driver.tui_ops`) ---
@@ -147,8 +162,20 @@ class CursorAgent:
         """
         tui_ops.await_done(self._require_pane(), timeout_s=timeout_s)
 
-    def send_prompt(self, text: str, *, timeout_s: float = tui_ops.AGENT_TIMEOUT_S) -> None:
-        """Wait until the agent TUI is ready, then send *text* and press Enter.
+    def send_prompt(
+        self,
+        text: str,
+        *,
+        timeout_s: float = tui_ops.AGENT_TIMEOUT_S,
+        prompt_as_file: bool = True,
+    ) -> None:
+        """Wait until the agent TUI is ready, then send the prompt and press Enter.
+
+        When *prompt_as_file* is ``True`` (default), *text* is written to a temp
+        ``.md`` file under :attr:`workspace`, tracked until :meth:`stop`, and a
+        short ``Read and follow the instructions in <path>`` line is sent — the
+        same pattern as :meth:`start` with a *prompt*.  Use ``False`` to send
+        *text* directly via tmux ``send-keys`` (only for short lines).
 
         Blocks until the agent has started working before returning.
 
@@ -159,7 +186,20 @@ class CursorAgent:
         """
         pane = self._require_pane()
         self.await_ready(timeout_s=timeout_s)
-        pane.send_keys(text, enter=False)
+        if prompt_as_file:
+            fd, prompt_path = tempfile.mkstemp(
+                suffix=".md",
+                prefix="cursor-driver-prompt-",
+                dir=str(self.workspace),
+            )
+            os.write(fd, text.encode("utf-8"))
+            os.close(fd)
+            p = Path(prompt_path)
+            self._prompt_paths.append(p)
+            text_to_send = f"Read and follow the instructions in {prompt_path}"
+        else:
+            text_to_send = text
+        pane.send_keys(text_to_send, enter=False)
         time.sleep(0.2)
         pane.send_keys("", enter=True)
         self.await_busy()
@@ -203,6 +243,9 @@ class CursorAgent:
         except Exception:
             pass
 
+        # Orphan temp prompts from a prior session on this agent instance.
+        self._cleanup_all_prompt_files()
+
         prompt_path: str | None = None
         self.pane = None
         try:
@@ -214,6 +257,7 @@ class CursorAgent:
                 )
                 os.write(fd, prompt.encode("utf-8"))
                 os.close(fd)
+                self._prompt_paths.append(Path(prompt_path))
 
             agent_cmd = f"{agent_bin} --yolo --model {self.model} --workspace {self.workspace}"
             if not self.quiet:
@@ -238,7 +282,7 @@ class CursorAgent:
 
             assert prompt_path is not None
             short_prompt = f"Read and follow the instructions in {prompt_path}"
-            self.send_prompt(short_prompt)
+            self.send_prompt(short_prompt, prompt_as_file=False)
             self.await_done()
             if not self.quiet:
                 print(f"[{self.label}] done.", flush=True)
@@ -252,6 +296,6 @@ class CursorAgent:
             return 1
         finally:
             if prompt_path is not None:
-                Path(prompt_path).unlink(missing_ok=True)
+                self._discard_prompt_file(prompt_path)
             if self.kill_session:
                 self.stop()
