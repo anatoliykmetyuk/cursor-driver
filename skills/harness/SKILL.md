@@ -120,7 +120,7 @@ patterns, code examples, and the cursor-driver API.
 At a high level, the script must:
 
 - **Resolve the working directory** first — from the SOP's data context,
-  never defaulting to the harness project dir or `cwd`.  Expose `--workdir`
+  or explicitly supplied by the user in the prompt or the SOP file.  Expose `--workdir`
   as a CLI override.
 - **Put configuration at the top** — agent model (env-overridable),
   parallelism, tmux socket name.
