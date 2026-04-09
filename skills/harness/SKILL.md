@@ -43,28 +43,15 @@ any code.
 While reading the SOP, figure out the **working directory** — the directory
 where the harness should run and where agents should open their workspaces.
 This is the single most important path decision in the harness because it
-determines what files agents can see and edit.
-
-The SOP may state the working directory explicitly (e.g. "clone the repo and
-work inside it").  If it does, use that.  If it doesn't, infer it from the
-data the SOP operates on — pick the narrowest scope that still covers every
-file the procedure touches:
-
-| SOP pattern | Working directory |
-|-------------|-------------------|
-| Operates on a cloned git repo | The clone directory |
-| Edits files inside a specific project | That project's root |
-| Processes a data file or directory | The parent directory containing the data |
-| No clear data anchor | A fresh temporary directory (`tempfile.mkdtemp`) |
+determines what files agents can see and edit.  Infer it from the data the
+SOP operates on — pick the narrowest scope that covers every file the
+procedure touches.
 
 The working directory is **never** the harness project directory itself (where
 `run.sh` and `src/` live), and **never** the directory from which `run.sh`
-happens to be invoked.  Those are implementation details of the harness, not
-the domain the SOP cares about.
+happens to be invoked.
 
 Confirm the working directory with the user alongside the step classification.
-The user knows which steps they trust a script to do and which need an
-agent's judgment.
 
 ## Step 2 — Create the project directory
 
@@ -97,44 +84,9 @@ some-dir/
     └── out/                       # (gitignored) agent output artifacts
 ```
 
-### File contents
-
-**`setup.sh`**
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-cd "$(dirname "$0")"
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-```
-
-**`run.sh`**
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-cd "$(dirname "$0")"
-exec .venv/bin/python -u src/<script>.py "$@"
-```
-
-**`requirements.txt`** — always include cursor-driver via absolute local path:
-
-```
-/Users/anatolii/Projects/cursor-driver
-```
-
-Add other dependencies (e.g. `tqdm`) as needed.
-
-**`.gitignore`**
-
-```
-.venv/
-__pycache__/
-out/
-```
-
-Make `setup.sh` and `run.sh` executable.
+Read [references/project-boilerplate.md](references/project-boilerplate.md)
+for the exact file contents of `setup.sh`, `run.sh`, `test.sh`,
+`requirements.txt`, and `.gitignore`.  Make the shell scripts executable.
 
 ## Step 3 — Write prompt templates
 
@@ -152,214 +104,39 @@ A good prompt template has:
    not do (which files to edit, which fields to change, what constitutes a
    valid output).
 
-Example:
-
-```markdown
-You are running the discovery workflow for **one** plugin.
-
-## Context
-
-| Field | Value |
-|-------|-------|
-| Plugin ID | {{PLUGIN_ID}} |
-| Clone path | {{CLONE_DIR}} |
-| Tracker file | {{TRACKER_PATH}} |
-
-## Tasks
-
-1. Read `{{CLONE_DIR}}/build.sbt`.
-2. Decide porting status using the markers below.
-3. Edit `{{TRACKER_PATH}}`: update Status for ID {{PLUGIN_ID}}.
-
-## Rules
-
-- Only change Status to "Already Ported" if markers confirm it.
-  Otherwise leave the existing value untouched.
-```
-
 Keep prompts focused on a single concern.  If the SOP has a final
 aggregation / summary step, that is a separate prompt template with its own
 placeholders.
 
+See [references/project-boilerplate.md](references/project-boilerplate.md)
+for a full prompt template example.
+
 ## Step 4 — Write the automation script
 
-The script lives at `src/<name>.py`.  Structure it as follows.
+The script lives at `src/<name>.py`.  Read
+[references/script-guide.md](references/script-guide.md) for detailed
+patterns, code examples, and the cursor-driver API.
 
-### Working directory resolution
+At a high level, the script must:
 
-The script must resolve the working directory before doing anything else.
-This is the directory agents open as their workspace and where the harness
-runs its mechanical steps — it is the SOP's operating context, not the
-harness project directory.
-
-Expose it as a `--workdir` CLI flag so the user can always override it.  When
-the flag is omitted, the script should resolve the directory automatically
-based on what the SOP operates on.  If the SOP clones a repo, the clone
-target *is* the working directory.  If the SOP processes files at a known
-path, that path is the working directory.  When there is genuinely no anchor,
-create a temporary directory and log its path so the user can find it:
-
-```python
-import tempfile
-
-def resolve_workdir(cli_value: str | None, sop_default: str | None) -> Path:
-    if cli_value:
-        return Path(cli_value).resolve()
-    if sop_default:
-        return Path(sop_default).resolve()
-    workdir = Path(tempfile.mkdtemp(prefix="harness-"))
-    print(f"No working directory specified; using temp dir: {workdir}", file=sys.stderr)
-    return workdir
-```
-
-Pass the resolved working directory to every step function and to
-`CursorAgent(workspace=workdir, ...)`.  Never default `workspace` to the
-harness project directory or to `Path.cwd()`.
-
-### Configuration section
-
-Put tunables at the top so they are easy to find and change:
-
-```python
-AGENT_MODEL = os.environ.get("<PREFIX>_AGENT_MODEL", "composer-2-fast")
-PARALLEL = 5
-TMUX_SOCKET = "<sop-name>"
-```
-
-- Model is overridable via environment variable, with a sensible default.
-- Parallelism is a constant referenced by a `--parallel` CLI flag.
-- Tmux socket name is unique to this SOP to isolate its sessions.
-
-### Placeholder substitution
-
-Use a simple string-replace helper — no template engine needed:
-
-```python
-def apply_placeholders(template: str, mapping: dict[str, str]) -> str:
-    out = template
-    for key, value in mapping.items():
-        out = out.replace(f"{{{{{key}}}}}", value)
-    return out
-```
-
-### One function per SOP step
-
-Every step of the SOP gets its own function in the script — mechanical or
-agentic.  When someone reads the script, they should be able to look at the
-function list and immediately see the 1-to-1 mapping to the SOP steps.
-
-For **mechanical** steps, the function contains the Python logic directly
-(clone a repo, parse JSON, back up a file, etc.).
-
-For **agentic** steps, the function:
-
-1. Prepares the placeholder mapping from runtime data.
-2. Calls `apply_placeholders` on the prompt template.
-3. Creates a `CursorAgent`, calls `.start(prompt=...)`, then `.await_done()`.
-
-```python
-from cursor_driver import CursorAgent
-
-def run_my_agent(entry, *, template, model, ...):
-    prompt = apply_placeholders(template, {"KEY": value, ...})
-    agent = CursorAgent(
-        workspace, model,
-        tmux_socket=TMUX_SOCKET, label=f"step-{entry_id}", quiet=quiet,
-    )
-    code = agent.start(prompt=prompt)
-    if code == 0:
-        agent.await_done()
-    return code
-```
-
-### Chunking prompts around long-running tasks
-
-Every long-running or token-heavy operation — compilation, a full test suite,
-an iterative fix-and-retry loop, a large data migration — floods the agent's
-context window with output.  Instructions that appeared earlier in the same
-prompt get pushed out of the model's effective attention, and in practice the
-agent "forgets" to follow them roughly a third of the time.
-
-Split each boundary where this can happen into a separate prompt chunk.  The
-first chunk runs via `agent.start(prompt=...)`, subsequent chunks via
-`agent.send_prompt(...)`.  Each call writes a fresh prompt file under the
-workspace, so the next batch of instructions lands at the top of the agent's
-attention instead of buried under pages of build logs.
-
-Name the prompt templates `<step>_prompt_0.md`, `<step>_prompt_1.md`, etc.
-under `prompts/`.  Single-turn steps that don't need chunking keep their
-plain `<step>.md` name.
-
-Use `kill_session=False` on `CursorAgent` when you chain chunks in one session.
-
-```python
-templates = [
-    prompts_dir / "deploy_prompt_0.md",   # e.g. build the project
-    prompts_dir / "deploy_prompt_1.md",   # e.g. run the test suite
-    prompts_dir / "deploy_prompt_2.md",   # e.g. analyse failures and fix
-]
-
-agent = CursorAgent(workspace, model, tmux_socket=TMUX_SOCKET, kill_session=False)
-if agent.start(prompt=apply_placeholders(templates[0].read_text(), mapping)) != 0:
-    return 1
-agent.await_done()
-for tmpl in templates[1:]:
-    agent.send_prompt(apply_placeholders(tmpl.read_text(), mapping))
-    agent.await_done()
-agent.stop()
-```
-
-The rule of thumb: if an operation might produce hundreds of lines of output or
-take long enough that the agent iterates many times, that is a chunk boundary.
-Put the instructions that follow it into the next prompt file.
-
-Key points about the cursor-driver API:
-
-- `CursorAgent(workspace, model, *, tmux_socket, label, quiet, kill_session)`
-- `.start(prompt=None) -> int` — launches agent in tmux; if prompt is given,
-  writes it to a temp file and sends the agent a short instruction to read it.
-  Returns `0` on success.  Does **not** wait for the agent to finish.
-- `.await_done(*, timeout_s=...)` — blocks until the agent finishes its
-  current work.  Call this explicitly after a successful `start()`.
-- `.send_prompt(text, ..., prompt_as_file=True)` — for multi-turn flows: waits
-  for ready, sends the prompt (by default written to a temp file like `start`,
-  with a short "read this file" instruction), waits for busy.  Use
-  `prompt_as_file=False` to send *text* directly as keystrokes (short lines only).
-
-### Parallel execution
-
-When the SOP loops over a collection (e.g. "for each plugin"), use
-`ThreadPoolExecutor` with the configurable parallelism.  Each agent gets a
-unique label (e.g. `plugin-{id}`) so tmux sessions don't collide.  Use a
-`threading.Lock` around shared mutable counters.
-
-Display a `tqdm` progress bar on stderr to track completion.  Add `tqdm` to
-`requirements.txt`.  Update the bar in the `as_completed` loop so the
-operator sees how many items have finished out of the total.
-
-### CLI
-
-Expose useful flags via `argparse`: `--workdir`, `--parallel`, `--max-items`,
-`--only-id`, `--no-progress`.  Wire defaults to the configuration constants.
-`--workdir` overrides the working directory; when omitted, the script resolves
-it automatically as described above.
-
-### Main function
-
-`main()` should be short and read like the SOP itself — a sequence of calls
-to the per-step functions.  Someone reading `main()` should immediately
-recognize the SOP's procedure:
-
-```python
-def main() -> int:
-    args = parse_args()
-    # Step 1
-    step_1_result = run_step_1(...)
-    # Step 2
-    step_2_result = run_step_2(...)
-    # Step 3
-    ...
-```
+- **Resolve the working directory** first — from the SOP's data context,
+  never defaulting to the harness project dir or `cwd`.  Expose `--workdir`
+  as a CLI override.
+- **Put configuration at the top** — agent model (env-overridable),
+  parallelism, tmux socket name.
+- **One function per SOP step** — mechanical steps contain Python logic
+  directly; agentic steps load a prompt template, substitute placeholders,
+  and drive a `CursorAgent`.
+- **Chunk prompts** around long-running tasks — split at boundaries where
+  output floods the context window, using `send_prompt()` for subsequent
+  turns.
+- **Parallel execution** — when the SOP loops over a collection, use
+  `ThreadPoolExecutor` with a configurable worker count and a `tqdm`
+  progress bar.
+- **CLI** — `argparse` with `--workdir`, `--parallel`, `--max-items`,
+  `--only-id`, `--no-progress`.
+- **`main()`** reads like the SOP — a short sequence of calls to per-step
+  functions.
 
 ## Step 5 — Write tests
 
@@ -373,18 +150,8 @@ In short:
 2. Create `tests/` with one file per layer: helpers, file parsing, mechanical
    steps (mocked `subprocess.run`), agent wrappers (mocked `CursorAgent`),
    and pipeline flow (all mocked, every branch covered).
-3. Create `test.sh` alongside `run.sh` — a convenience script that runs
-   `pytest` inside the venv:
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-cd "$(dirname "$0")"
-exec .venv/bin/python -m pytest tests/ "$@"
-```
-
-4. Make `test.sh` executable.
-5. Run the suite and fix any failures before presenting work to the user.
+3. Make `test.sh` executable.
+4. Run the suite and fix any failures before presenting work to the user.
 
 See `TESTING.md` for the full testing strategy: layer definitions, fixture
 patterns, mock setup, scenario tables, and the checklist.
