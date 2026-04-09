@@ -411,3 +411,38 @@ def test_quiet_suppresses_driver_prints(
     out = capsys.readouterr().out
     assert "starting agent" not in out
     assert "attach with" not in out
+
+
+def test_no_source_activate_after_prompt(
+    tmp_path: Path, unique_session_ids: tuple[str, str]
+) -> None:
+    """The agent must never emit ``source .../activate`` in the tmux pane."""
+    import re
+
+    soc, label = unique_session_ids
+    proof = tmp_path / "proof.txt"
+    instruction = (
+        f"Create a file at exactly this path with content OK:\\n{proof}\\nReply DONE when finished."
+    )
+    agent = CursorAgent(
+        tmp_path,
+        MODEL,
+        tmux_socket=soc,
+        label=label,
+        quiet=True,
+        kill_session=False,
+    )
+    try:
+        assert agent.start(prompt=None) == 0
+        assert agent.pane is not None
+        agent.await_ready(timeout_s=900)
+        agent.send_prompt(instruction, timeout_s=900, prompt_as_file=True)
+        agent.await_done(timeout_s=900)
+        from cursor_driver.tui_ops import strip_ansi
+
+        lines = agent.pane.capture_pane(start="-", end="-")
+        dump = strip_ansi("\n".join(lines))
+        hits = re.findall(r"(?i)source\s+\S*activate", dump)
+        assert not hits, f"pane contains venv activate command: {hits}\n{dump}"
+    finally:
+        agent.stop()

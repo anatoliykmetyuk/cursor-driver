@@ -276,6 +276,7 @@ class CursorAgent:
             session = server.new_session(
                 session_name=session_name,
                 window_command=agent_cmd,
+                start_directory=str(self.workspace),
                 attach=False,
             )
             pane = session.active_window.active_pane
