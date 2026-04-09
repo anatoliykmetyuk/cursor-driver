@@ -352,11 +352,11 @@ def test_prompt_as_file_temp_cleanup_on_stop(
             )
             agent.await_done(timeout_s=900)
             agent.await_ready(timeout_s=900)
-        assert list(tmp_path.glob("cursor-driver-prompt-*.md"))
+        assert list(tmp_path.glob(".cursor/prompts/cursor-driver-prompt-*.md"))
     finally:
         agent.stop()
 
-    assert not list(tmp_path.glob("cursor-driver-prompt-*.md"))
+    assert not list(tmp_path.glob(".cursor/prompts/cursor-driver-prompt-*.md"))
 
 
 @pytest.mark.parametrize("prompt_as_file", [True, False])

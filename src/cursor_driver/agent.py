@@ -22,7 +22,7 @@ class CursorAgent:
     :meth:`send_prompt` to type into that TUI after a session-only start.
 
     When :meth:`start` is given a *prompt* string, the text is written to a temp
-    file under *workspace*, a short instruction is sent so the agent reads that
+    file under ``<workspace>/.cursor/prompts``, a short instruction is sent so the agent reads that
     file, and the call blocks until the agent finishes (busy → idle).  When
     *prompt* is omitted, only the tmux session is started.
 
@@ -52,8 +52,8 @@ class CursorAgent:
         Parameters
         ----------
         workspace:
-            Working directory for the agent (and, when :meth:`start` is called
-            with a prompt, where the temp instruction file is created).
+            Working directory for the agent (temp prompt files live under
+            ``.cursor/prompts/``).
         model:
             Model identifier passed to ``agent --model``.
         tmux_socket:
@@ -76,6 +76,11 @@ class CursorAgent:
         self.kill_session = kill_session
         self.pane: libtmux.Pane | None = None
         self._prompt_paths: list[Path] = []
+
+    def _prompt_staging_dir(self) -> Path:
+        d = self.workspace / ".cursor" / "prompts"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
 
     def _discard_prompt_file(self, path: Path | str) -> None:
         p = Path(path)
@@ -172,7 +177,7 @@ class CursorAgent:
         """Wait until the agent TUI is ready, then send the prompt and press Enter.
 
         When *prompt_as_file* is ``True`` (default), *text* is written to a temp
-        ``.md`` file under :attr:`workspace`, tracked until :meth:`stop`, and a
+        ``.md`` file under ``.cursor/prompts/``, tracked until :meth:`stop`, and a
         short ``Read and follow the instructions in <path>`` line is sent — the
         same pattern as :meth:`start` with a *prompt*.  Use ``False`` to send
         *text* directly via tmux ``send-keys`` (only for short lines).
@@ -190,7 +195,7 @@ class CursorAgent:
             fd, prompt_path = tempfile.mkstemp(
                 suffix=".md",
                 prefix="cursor-driver-prompt-",
-                dir=str(self.workspace),
+                dir=str(self._prompt_staging_dir()),
             )
             os.write(fd, text.encode("utf-8"))
             os.close(fd)
@@ -253,7 +258,7 @@ class CursorAgent:
                 fd, prompt_path = tempfile.mkstemp(
                     suffix=".md",
                     prefix="cursor-driver-prompt-",
-                    dir=str(self.workspace),
+                    dir=str(self._prompt_staging_dir()),
                 )
                 os.write(fd, prompt.encode("utf-8"))
                 os.close(fd)
