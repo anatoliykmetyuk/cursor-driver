@@ -36,8 +36,35 @@ whether it is:
 | **Agentic** | inspect source code and decide something, write a summary, make a judgment call | A prompt template fed to `CursorAgent` |
 
 Present your classification to the user and get confirmation before writing
-any code.  The user knows which steps they trust a script to do and which
-need an agent's judgment.
+any code.
+
+### Identify the working directory
+
+While reading the SOP, figure out the **working directory** — the directory
+where the harness should run and where agents should open their workspaces.
+This is the single most important path decision in the harness because it
+determines what files agents can see and edit.
+
+The SOP may state the working directory explicitly (e.g. "clone the repo and
+work inside it").  If it does, use that.  If it doesn't, infer it from the
+data the SOP operates on — pick the narrowest scope that still covers every
+file the procedure touches:
+
+| SOP pattern | Working directory |
+|-------------|-------------------|
+| Operates on a cloned git repo | The clone directory |
+| Edits files inside a specific project | That project's root |
+| Processes a data file or directory | The parent directory containing the data |
+| No clear data anchor | A fresh temporary directory (`tempfile.mkdtemp`) |
+
+The working directory is **never** the harness project directory itself (where
+`run.sh` and `src/` live), and **never** the directory from which `run.sh`
+happens to be invoked.  Those are implementation details of the harness, not
+the domain the SOP cares about.
+
+Confirm the working directory with the user alongside the step classification.
+The user knows which steps they trust a script to do and which need an
+agent's judgment.
 
 ## Step 2 — Create the project directory
 
@@ -157,6 +184,37 @@ placeholders.
 ## Step 4 — Write the automation script
 
 The script lives at `src/<name>.py`.  Structure it as follows.
+
+### Working directory resolution
+
+The script must resolve the working directory before doing anything else.
+This is the directory agents open as their workspace and where the harness
+runs its mechanical steps — it is the SOP's operating context, not the
+harness project directory.
+
+Expose it as a `--workdir` CLI flag so the user can always override it.  When
+the flag is omitted, the script should resolve the directory automatically
+based on what the SOP operates on.  If the SOP clones a repo, the clone
+target *is* the working directory.  If the SOP processes files at a known
+path, that path is the working directory.  When there is genuinely no anchor,
+create a temporary directory and log its path so the user can find it:
+
+```python
+import tempfile
+
+def resolve_workdir(cli_value: str | None, sop_default: str | None) -> Path:
+    if cli_value:
+        return Path(cli_value).resolve()
+    if sop_default:
+        return Path(sop_default).resolve()
+    workdir = Path(tempfile.mkdtemp(prefix="harness-"))
+    print(f"No working directory specified; using temp dir: {workdir}", file=sys.stderr)
+    return workdir
+```
+
+Pass the resolved working directory to every step function and to
+`CursorAgent(workspace=workdir, ...)`.  Never default `workspace` to the
+harness project directory or to `Path.cwd()`.
 
 ### Configuration section
 
@@ -281,8 +339,10 @@ operator sees how many items have finished out of the total.
 
 ### CLI
 
-Expose useful flags via `argparse`: `--parallel`, `--max-items`,
+Expose useful flags via `argparse`: `--workdir`, `--parallel`, `--max-items`,
 `--only-id`, `--no-progress`.  Wire defaults to the configuration constants.
+`--workdir` overrides the working directory; when omitted, the script resolves
+it automatically as described above.
 
 ### Main function
 
@@ -341,6 +401,8 @@ SOP changes, the script should be updated to match, not the other way around.
 
 Before you present the result to the user, verify:
 
+- [ ] Working directory is resolved from the SOP's data context, never defaulting to the harness project dir or `cwd`.
+- [ ] `--workdir` CLI flag exists for user override.
 - [ ] `SOP.md` is present and reflects the automated workflow.
 - [ ] `setup.sh` and `run.sh` are executable.
 - [ ] `requirements.txt` includes the absolute path to cursor-driver.
