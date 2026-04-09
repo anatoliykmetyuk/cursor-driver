@@ -11,7 +11,7 @@ import pytest
 
 from cursor_driver.agent import CursorAgent
 
-MODEL = os.environ.get("CURSOR_DRIVER_MODEL", "composer-2")
+MODEL = os.environ.get("CURSOR_DRIVER_MODEL", "composer-2-fast")
 
 pytestmark = [
     pytest.mark.integration,
